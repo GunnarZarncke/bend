@@ -79,30 +79,30 @@ def exit_of(ws: List<&2, U32>) -> M.Exit:
 def no_exit() -> M.Exit:
   M.Fault{M.W64.zero(), M.Regs.zero()}
 
-def drive(acts: List<&2, M.Action>, +m: M.Machine) -> IO(M.Exit):
+def drive(acts: List<&2, M.Action>, +ps: M.Tree<M.Owner>) -> IO(M.Exit):
   match acts:
     case Nil{}:
       IO.pure(M.Exit, no_exit())
     case M.Commit{+g} <> rest:
       do IO<M.Exit>:
-        Hv.commit(U32.from_nat(g), mask_words(M.mask_of(M.Machine.pages(m), g)))
-        drive(rest, m)
+        Hv.commit(g, mask_words(M.Tree.to_list(Bool, M.mask(ps, g), Nil{})))
+        drive(rest, ps)
     case M.Arm{us} <> rest:
       do IO<M.Exit>:
         Hv.arm(us)
-        drive(rest, m)
+        drive(rest, ps)
     case M.Stop{g} <> rest:
       do IO<M.Exit>:
         IO.print("")
-        IO.print("[guest " ++ Nat.show(g) ++ " stopped]")
-        drive(rest, m)
+        IO.print("[guest " ++ U32.show(g) ++ " stopped]")
+        drive(rest, ps)
     case M.Print{s} <> rest:
       do IO<M.Exit>:
         IO.write(s)
-        drive(rest, m)
+        drive(rest, ps)
     case M.Enter{g, regs} <> rest:
       do IO<M.Exit>:
-        ws : List<&2, U32> <- Hv.enter(U32.from_nat(g), M.Regs.encode(regs))
+        ws : List<&2, U32> <- Hv.enter(g, M.Regs.encode(regs, Nil{}))
         return exit_of(ws)
     case M.End{} <> rest:
       IO.pure(M.Exit, no_exit())
@@ -124,7 +124,7 @@ def settle(acts: List<&2, M.Action>) -> IO(Unit):
     case M.Stop{g} <> rest:
       do IO<Unit>:
         IO.print("")
-        IO.print("[guest " ++ Nat.show(g) ++ " stopped]")
+        IO.print("[guest " ++ U32.show(g) ++ " stopped]")
         settle(rest)
     case M.Print{s} <> rest:
       do IO<Unit>:
@@ -147,31 +147,23 @@ def instance(fuel: Nat, s: M.Step) -> IO(Unit):
         IO.print("")
         IO.print("[instance ends: handoff]")
         Hv.again()
-    case 1n+f M.Go{k, +m, acts}:
+    case 1n+f M.Go{+k, M.Machine{+ps, vs, +cur}, acts}:
       do IO<Unit>:
-        +e : M.Exit <- drive(acts, m)
+        +e : M.Exit <- drive(acts, ps)
         IO.print("")
-        IO.print(Nat.show(M.Machine.cur(m)) ++ ": " ++ M.Exit.show(e))
-        instance(f, M.handle(k, m, e))
+        IO.print(U32.show(cur) ++ ": " ++ M.Exit.show(e))
+        instance(f, M.handle(k, M.Machine{ps, vs, cur}, e))
 
 # Boot
 # ----
 # guest g starts at its first block, 16 MiB apart from 0xA1000000
 
-def guest_regs(g: Nat) -> M.Regs:
-  M.Regs{M.W64.zero(), M.W64.zero(), M.W64.zero(), M.W64.zero(),
-    M.W64{0, U32.add(2701131776, U32.mul(U32.from_nat(g), 16777216))}}
+def guest(+g: U32) -> M.VCpu:
+  M.VCpu{M.Regs{M.W64.zero(), M.W64.zero(), M.W64.zero(), M.W64.zero(),
+    M.W64{0, U32.add(2701131776, U32.mul(g, 16777216))}}, True{}}
 
-def vcpus_from(n: Nat, +g: Nat) -> List<&2, M.VCpu>:
-  match n:
-    case 0n:
-      Nil{}
-    case 1n+p:
-      M.VCpu{guest_regs(g), True{}} <> vcpus_from(p, Nat.add(g, 1n))
-
-def boot_machine(+n: Nat) -> M.Machine:
-  M.Machine{List.append(&2, M.Owner, List.replicate(M.Owner, 8n, M.Hyp{}), M.blocks(n, 0n, 8n)),
-    vcpus_from(n, 0n), 0n}
+def boot_machine() -> M.Machine:
+  M.Machine{M.blocks(M.page_depth(), 0n, 4n), M.four(guest(0), guest(1), guest(2), guest(3)), 0}
 
 def boot(i: U32, r: Maybe<(M.Kernel & M.Machine)>) -> IO(Unit):
   match r:
@@ -179,7 +171,7 @@ def boot(i: U32, r: Maybe<(M.Kernel & M.Machine)>) -> IO(Unit):
       do IO<Unit>:
         IO.print("bend hypervisor: boot, 4 guests")
         Hv.init(4)
-        instance(fuel(), M.sched(M.Kernel{4n, 0n, 10000}, boot_machine(4n)))
+        instance(fuel(), M.sched(M.Kernel{4, 0, 10000}, boot_machine()))
     case Some{(k, m)}:
       do IO<Unit>:
         IO.print("[instance " ++ U32.show(i) ++ ": from the record]")

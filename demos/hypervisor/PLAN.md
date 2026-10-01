@@ -1,5 +1,10 @@
 # Bend Hypervisor: the plan
 
+Status (2026-09-29): workstreams 1 and 2 are done, and 3 but for its
+last item; each section ends in what was done and how it differs from
+the plan. Every law the AI added or restated is marked DRAFT in
+LAWS.bend and SHIM_LAWS.bend, for the human to confirm or rewrite.
+
 Five workstreams, in the order they should run. The first two change the
 Bend side only; the third builds a machine semantics; the last two need
 hardware. Each ends in something the gates can check. Throughout, the
@@ -39,6 +44,19 @@ text. If so, keep a list model as the specification and prove the array
 model refines it (one lemma per accessor), rather than proving the laws
 twice.
 
+Done. The vCPUs are an `Array<VCpu>` of four slots and the guest ids
+`U32`; the pages are a Data tree of 64 blocks, not an Array: they never
+change and every decision reads them, and an Array, affine even in a
+proof, cannot be read by a lemma and by the induction hypothesis both.
+Lemmas.bend has U32 equality (sound, reflexive), views of a U32 below
+four and of one masked to two bits as a literal, and Array.get's descent
+handing its array back; the get/set facts are proved on the four-slot
+array by making the index a literal, not by induction on the depth (that
+needs a lemma library over Word arithmetic, which is the way past four
+guests). `decode` builds full trees structurally, so the round trip is
+the law `record_roundtrip`. The simulator's log is unchanged; the masks
+line lists 64 blocks and the record is 114 words.
+
 ## 2. Noninterference
 
 Goal: the theorem the two current laws are lemmas of, stated over traces
@@ -72,6 +90,17 @@ and proved.
 
 Done when: LAWS.bend states the theorem and the axiom; PROOF.bend proves
 the theorem; `--verdict` agrees.
+
+Done. `run` in main.bend is the semantics: a fold of the kernel over
+exits and handoffs (a handoff encodes, decodes and schedules afresh, as
+bare.bend's instances do); the simulator renders it. `handle` steps the
+current vCPU by `VCpu.step` before it decides, so `handle_own` is the
+statement of "a function of the exit and the old vCPU only". The theorem
+is `run_view` (a's final vCPU is `VCpu.steps` of a's own exits) and its
+two-run corollary `noninterference`; with `handle_enters_saved` it says
+what a guest is entered with depends on its own exits alone. The axiom
+did not stay an open claim: workstream 3 proves it, so LAWS.bend states
+it as the three guest-step laws over Isa.bend.
 
 ## 3. Verifying the assembly
 
@@ -108,6 +137,43 @@ verification but on three hundred words rather than ten thousand lines.
 
 Done when: the axiom's def is filled from `Isa.bend`, and the
 differential harness passes.
+
+Done. Isa.bend models the shim's forms and the test guests'; the stage-2
+walk reads the mask itself, so that the C writes the descriptors of the
+mask is trusted, and tested only through the aborts diff.sh sees. The
+axiom is proved as `guest_step_memory`, `guest_step_registers` and
+`guest_step_stage2`, and the kernel confirms them. gen_shim.sh writes
+the shim to shim_words.bend; SHIM_LAWS.bend states the enter and the two
+exit paths for every guest's area, and SHIM_PROOF.bend proves them by
+running the words symbolically. The kernel confirms those too now.
+Isa.bend is written for an evaluator without sharing (SPEC.md, section
+14): a step takes the state apart once, forces every value and every
+address it reads before that value enters the next state, and builds the
+next state once. A symbolic run went from 13 GB and out of memory at
+five steps to 30 MB and 0.2 s at seventeen, which is where the fuel of
+one def runs out; past that each path is cut into segments of eight
+steps or fewer, each starting from a state written out, and Chain.bend
+adds them up. gen_seg.sh writes the 154 of them, asking bend2 for every
+state and asking the kernel whether each segment fits. The differential
+harness is what keeps the rewrite honest: it caught a write-back this
+rewrite dropped (a post-indexed load to the stack pointer), which is the
+kind of bug a proof about the shim would not have found, since the shim
+does not use that form. diff.sh (diff.bend on QEMU, model.bend on the
+semantics) compares every action and the 55 saved registers at each of
+14 exits of guest set 1, which exercises every form, both fault levels,
+both access directions, an instruction fault and a trapped WFI.
+
+Item 5 took the largest of the three C effects around the shim. The exit
+decoding is now hv_decide, the shim's own words: it takes the ESR, the
+FAR, the HPFAR and the area in registers and answers the exit's kind and
+the address a stage-2 abort faulted at, and `shim_decide_*` states its
+five arms, which the kernel confirms. Isa.bend grew the forms it wanted
+(MOVK, AND of registers, LSL and LSR by an immediate), and guest set 1
+grew a block that uses all of them, so QEMU checks them too. The other
+two stay in C: the stage-2 tables and the GIC are MMIO and cache and TLB
+maintenance, which Isa.bend does not model and should not grow for one
+call site, and the Bend-in-Bend compiler's preservation theorem is the
+route this plan already names for them.
 
 Risk: exception and translation semantics are where an ISA model goes
 wrong. Model only what the shim exercises, and let the differential
