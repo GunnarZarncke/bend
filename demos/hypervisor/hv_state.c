@@ -57,11 +57,16 @@ typedef struct {
   u32      instances;
   u32      pad;
   HvArea   area[HV_GUESTS];
+  HvArea   snap;               // the area as the last exit saved it
   HvSlot   slot[2];
   HvTables tab[HV_GUESTS] __attribute__((aligned(4096)));
 } HvState;
 
 #define HV ((HvState*)__persist_start)
+
+// the guest set Hv.init loads (hv.c): 0, unless diff.bend's Hv.select
+// (hv_diff.c) sets it first
+static u32 hv_set;
 
 // Registers
 // ---------
@@ -183,6 +188,49 @@ __asm__(
   "  mrs x1, elr_el2\n"
   "  mrs x2, far_el2\n"
   "  b bare_fault\n"
+  ".global hv_decide\n"
+  "hv_decide:\n"
+  "  lsr  x4, x0, #26\n"
+  "  mov  w6, #5\n"
+  "  cmp  x4, #0x16\n"
+  "  b.eq .Lhvc\n"
+  "  cmp  x4, #0x24\n"
+  "  b.eq .Ldata\n"
+  "  cmp  x4, #0x20\n"
+  "  b.eq .Linst\n"
+  "  cmp  x4, #0x01\n"
+  "  b.eq .Lown\n"
+  "  b .Lnofar\n"
+  ".Lhvc:\n"
+  "  mov  w6, #1\n"
+  "  b .Lnofar\n"
+  ".Ldata:\n"
+  "  mov  w6, #2\n"
+  "  b .Lfar\n"
+  ".Linst:\n"
+  "  mov  w6, #3\n"
+  "  b .Lfar\n"
+  ".Lown:\n"
+  "  mov  w6, #4\n"
+  "  ldr  x7, [x3, #264]\n"
+  "  add  x7, x7, #4\n"
+  "  str  x7, [x3, #264]\n"
+  "  b .Lnofar\n"
+  ".Lnofar:\n"
+  "  mov  x1, xzr\n"
+  "  b .Ldone\n"
+  ".Lfar:\n"
+  "  movz x7, #0xfff0\n"
+  "  movk x7, #0xffff, lsl #16\n"
+  "  movk x7, #0x00ff, lsl #32\n"
+  "  and  x2, x2, x7\n"
+  "  lsl  x2, x2, #8\n"
+  "  movz x7, #0xfff\n"
+  "  and  x1, x1, x7\n"
+  "  orr  x1, x2, x1\n"
+  ".Ldone:\n"
+  "  mov  w0, w6\n"
+  "  ret\n"
   ".balign 2048\n"
   ".global hv_vectors\n"
   "hv_vectors:\n"
@@ -205,6 +253,17 @@ __asm__(
 );
 
 extern u64 hv_enter(HvArea* area, u64* host_sp);
+
+// the synchronous exit's kind and its faulting address, the shim's own
+// words rather than C, so SHIM_LAWS speaks of them (SPEC.md, section 13).
+// It takes the three words rather than reading them, so only the one
+// class that steps the guest's ELR past its instruction touches memory.
+typedef struct {
+  u64 kind;
+  u64 far;
+} HvKind;
+
+extern HvKind hv_decide(u64 esr, u64 far, u64 hpfar, HvArea* area);
 extern char hv_vectors[];
 
 // Words

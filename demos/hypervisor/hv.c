@@ -17,9 +17,32 @@ static const u32 hv_guest_c[] = { 0xd2800860, 0xd4000022, 0xd2a08013,
 static const u32 hv_guest_d[] = { 0xd2800880, 0xd4000022, 0xd2a80000,
   0xf9000000, 0xd2800880, 0xd4000022, 0xd4000042, 0x14000000 };
 
-static const u32* hv_guests[] = { hv_guest_a, hv_guest_b, hv_guest_c,
-  hv_guest_d };
-static const u32 hv_guest_len[] = { 8, 8, 9, 8 };
+// set 1, diff.sh's: every instruction form Isa.bend models, WFI, a read
+// of a block not owned, a branch out of the guest's blocks
+static const u32 hv_guest_e0[] = { 0xd28000a1, 0xd2800002, 0x91000c42,
+  0xf1000421, 0x54ffffc1, 0xaa0203e0, 0x9100c800, 0xd4000022, 0xd2bfffe3,
+  0x11000464, 0x6b040085, 0x54000040, 0xd4000122, 0xd40000e2, 0xf1000406,
+  0x54000044, 0xd4000122, 0xd28008a0, 0xd4000022, 0xd29fe008, 0xf2a24688,
+  0xf2d579a8, 0xf2e000e8, 0xd368fd09, 0xd35f792a, 0x8a08014b, 0xd347fd0c,
+  0xd37df18d, 0x8a0a01ae, 0x53057d0f, 0x531759f0, 0x0a080211, 0xaa1101d2,
+  0xd4000002, 0xd2a80007, 0xf90004e7, 0x14000000 };
+static const u32 hv_guest_e1[] = { 0x910003f4, 0xd2824681, 0xd28acf02,
+  0xa9bf0be1, 0xf81f8fe1, 0xf84087e3, 0xa8c117e4, 0xd1010295, 0xf90002a5,
+  0xf90006a4, 0xf94006a6, 0xa94022a7, 0xf8010ea1, 0xf85f06a9, 0xa90226a3,
+  0x910000c0, 0xd1400400, 0xd1079c00, 0xd4000022, 0xd2b5000a, 0xf940014b,
+  0xd4000042, 0x14000000 };
+static const u32 hv_guest_e2[] = { 0xd2822221, 0xd518d081, 0xd2844442,
+  0xd51bd042, 0xd51bd062, 0xd518d021, 0xd2860003, 0xd518c003, 0xd5186002,
+  0xd5185201, 0xd518a202, 0xd538d084, 0xd53bd045, 0x8b050086, 0xd2800a60,
+  0xd4000022, 0xd503207f, 0xd2800ae0, 0xd4000022, 0xd4000042, 0x14000000 };
+static const u32 hv_guest_e3[] = { 0xd2800920, 0xd4000022, 0x15000000,
+  0xd4000042 };
+
+static const u32* hv_guests[2][4] = {
+  { hv_guest_a, hv_guest_b, hv_guest_c, hv_guest_d },
+  { hv_guest_e0, hv_guest_e1, hv_guest_e2, hv_guest_e3 } };
+static const u32 hv_guest_len[2][4] = { { 8, 8, 9, 8 }, { 37, 23, 21, 4 } };
+
 
 // guest g's first block: the 8 hypervisor blocks, then 8 per guest
 static u64 hv_guest_pa(u32 g) {
@@ -29,9 +52,9 @@ static u64 hv_guest_pa(u32 g) {
 static void hv_guest_load(u32 g) {
   u64  pa   = hv_guest_pa(g);
   u32* code = (u32*)(uintptr_t)pa;
-  u32  n    = g < 4 ? hv_guest_len[g] : 0;
+  u32  n    = g < 4 ? hv_guest_len[hv_set][g] : 0;
   for (u32 i = 0; i < n; i += 1) {
-    code[i] = hv_guests[g][i];
+    code[i] = hv_guests[hv_set][g][i];
   }
   if (n == 0) {
     code[0] = 0xd4000042;   // hvc #2: a guest with no program quits
@@ -136,6 +159,7 @@ Term hv_enter_run(Env e, Term* f, IoWork* w) {
   }
   a->elr = (u64)win[8] << 32 | win[9];
   u64 kind = hv_enter(a, &HV->host_sp);
+  HV->snap = *a;
   u64 esr  = a->esr;
   u64 far  = 0;
   u32 k    = 5;
@@ -150,19 +174,9 @@ Term hv_enter_run(Env e, Term* f, IoWork* w) {
     }
     k = 0;
   } else if (kind == 0) {
-    u64 ec = esr >> 26;
-    if (ec == 0x16) {
-      k = 1;
-    } else if (ec == 0x24) {
-      k   = 2;
-      far = ((a->hpfar & 0xFFFFFFFFF0ull) << 8) | (a->far & 0xFFF);
-    } else if (ec == 0x20) {
-      k   = 3;
-      far = ((a->hpfar & 0xFFFFFFFFF0ull) << 8) | (a->far & 0xFFF);
-    } else if (ec == 0x01) {
-      k       = 4;
-      a->elr += 4;
-    }
+    HvKind d = hv_decide(esr, a->far, a->hpfar, a);
+    k   = (u32)d.kind;
+    far = d.far;
   }
   u32 out[15] = { k, (u32)(esr >> 32), (u32)esr, (u32)(far >> 32), (u32)far,
     (u32)(a->x[0] >> 32), (u32)a->x[0], (u32)(a->x[1] >> 32), (u32)a->x[1],
