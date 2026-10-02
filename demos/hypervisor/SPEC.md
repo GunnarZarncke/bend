@@ -17,7 +17,7 @@ over the same semantics; diff.sh checks the semantics against QEMU.
     sh demos/hypervisor/run.sh                   the real thing on QEMU
     sh demos/hypervisor/diff.sh                  Isa.bend against QEMU
     sh demos/hypervisor/gate.sh                  all of the above
-    sh demos/hypervisor/build.sh x.bend x.elf    any program, on the bare lane
+    sh demos/hypervisor/build.sh x.bend x.elf    any program, on the bare host
 
 ## 1. Scope
 
@@ -54,7 +54,7 @@ Trusted, not proved:
 * the stage-2 map read as the mask (the level-2 descriptors hv_commit_run writes are not modeled); 
 * the C of hv_state.c and hv.c outside the shim (about 400 lines: 
 * the tables, the GIC and timer, the handoff slots, the guest images);
-* the boot and the lane itself: bare.c, boot.c and build.sh; 
+* the boot and the host itself: bare.c, boot.c and build.sh; 
 * the Bend checker, compiler, runtime and clang. 
 
 The kernel has no `@unsafe` def. Liveness is not proved.
@@ -246,20 +246,20 @@ the file the shim saved at the last exit.
   (IPA from HPFAR and FAR, write from WnR), 0x20 `InstAbort`, 0x01 `Wfi`
   (ELR advances past the WFI), anything else `Fault`.
 
-## 10. The bare lane
+## 10. The bare host
 
 `sh demos/hypervisor/build.sh x.bend x.elf` builds any Bend program
-without `!` for EL2 on QEMU. The lane lives in the demo: bare.c is the
-host the runtime calls in place of an OS (the UART streams, semihosting
-exit, a bump heap, the string functions, and the memory and signal calls
-as the runtime makes them, so its own pool and corpus code runs unchanged
-over the linker's regions); boot.c is the MMU, the default vectors,
-`bend_main`, `_start`, and the event loop without descriptors; build.sh
-holds the linker script and the clang and lld invocation. The compiler
-keeps only a lane hook, some forty lines that know nothing of ARM64:
-`-DBEND_LANE='"x.c"'` names a file it includes after its types and again
-at its end, and its host-only code (float text, sockets, the descriptor
-event loop, the host `main`) is guarded out. Limits: one core; no float
+without `!` for EL2 on QEMU. It is an application of the runtime's
+freestanding build, which knows nothing of ARM64: `-DBEND_HOST='"x.c"'`
+skips the OS headers and `main`, and includes x.c in place of the OS host
+(the descriptor event loop, float text, sockets). Here x.c is boot.c: the
+MMU, the default vectors, `bend_main` and `_start`, the float text stubs,
+and the event loop without descriptors. bare.c, force-included ahead of
+the runtime, is the libc it calls (the UART streams, semihosting exit, a
+bump heap, the string functions, and the memory and signal calls as the
+runtime makes them, so its own pool and corpus code runs unchanged over
+the linker's regions); build.sh holds the linker script and the clang and
+lld invocation. Limits: one core; no float
 text; a blocking effect runs inline; a descriptor wait fail-stops; the
 bump heap frees nothing until the next instance. A deep recursion runs off
 the term stack into unbacked space and is reported as such.

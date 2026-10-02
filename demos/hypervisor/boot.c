@@ -1,20 +1,21 @@
-// hypervisor: the bare lane's boot and alternates, included by bare.c at
-// the end of the runtime: the float text stubs, the MMU, the default
-// vectors, bend_main and _start, and the event loop without descriptors.
+// hypervisor: the bare host, which the runtime includes in place of the
+// OS host (-DBEND_HOST='"boot.c"'): the float text stubs, the MMU, the
+// default vectors, bend_main and _start, and the event loop without
+// descriptors.
 // SPEC.md, section 10.
 
 static int f32_text(char* buf, f32 v) {
-  err_fail("no float text on the bare lane");
+  err_fail("no float text on the bare host");
   return 0;
 }
 
 static Term f32_show(Env e, Term x) {
-  err_fail("no float text on the bare lane");
+  err_fail("no float text on the bare host");
   return 0;
 }
 
 static Term f32_read(Env e, Term s) {
-  err_fail("no float text on the bare lane");
+  err_fail("no float text on the bare host");
   return 0;
 }
 
@@ -64,11 +65,14 @@ __attribute__((used, noreturn)) void bare_fault(u64 esr, u64 elr, u64 far) {
 
 static char* bare_argv[] = { "bend" };
 
+OUTLINE void io_loop(u64* H);
+
 __attribute__((used)) int bend_main(void) {
   bare_brk = __arena_start;
   io_argv  = bare_argv;
   io_argc  = 1;
-  io_loop(corpus_setup(false, 1, 0));
+  io_loop(corpus_setup(false, 1,
+    (u64)(__arena_end - __arena_start) - BARE_HEAP));
   io_sync();
   return 0;
 }
@@ -138,7 +142,7 @@ __asm__(
 
 // Alternates
 // ==========
-// the event loop without descriptors; the shim declares these
+// the event loop without descriptors
 
 // The term stack is the linker's region at the top of RAM: a deep
 // recursion runs off it into unbacked space, which faults into the vectors.
@@ -171,7 +175,7 @@ static void io_wait(Env e) {
   }
   u64 soon = io_park != NULL ? io_park->next->time : 0;
   if (soon == 0) {
-    err_fail("a descriptor wait on the bare lane");
+    err_fail("a descriptor wait on the bare host");
   }
   while (io_tick() < soon) {
     __asm__ volatile("yield");

@@ -428,7 +428,6 @@ static Term f32_read(Env e, Term s);
 #endif
 `.slice(1),
   IO: String.raw`
-#ifndef BEND_LANE
 static int f32_text(char* buf, f32 v) {
   int n = 0;
   int p = 0;
@@ -474,8 +473,6 @@ static Term f32_read(Env e, Term s) {
   free(text);
   return out;
 }
-
-#endif
 `.slice(1),
   JS: String.raw`
 function word_to_u32(w) {
@@ -3440,10 +3437,7 @@ const runtime_c = (tabs: string, spins: string, segs: string,
 #ifdef __METAL_VERSION__
 #include <metal_stdlib>
 using namespace metal;
-#elif defined(BEND_LANE)
-#include <stdint.h>
-#include <stdbool.h>
-#elif !defined(BEND_RTC)
+#elif !defined(BEND_RTC) && !defined(BEND_HOST)
 #ifdef __APPLE__
 #define _DARWIN_UNLIMITED_SELECT
 #else
@@ -3464,6 +3458,11 @@ using namespace metal;
 #include <time.h>
 #include <poll.h>
 #include <sys/select.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -3603,14 +3602,6 @@ typedef struct {
   DEV u64* mem;
   DEV u64* alc;
 } Env;
-
-// A lane (-DBEND_LANE='"x.c"') brings its own host in place of the OS: x.c
-// is included here, after the types, and again at the end with
-// BEND_LANE_END; the host-only code below is guarded out. demos/hypervisor
-// has one, for EL2 on ARM64.
-#ifdef BEND_LANE
-#include BEND_LANE
-#endif
 
 typedef struct {
   u64 off;
@@ -4876,7 +4867,6 @@ static Term* pool_stack(void) {
   return (Term*)p;
 }
 
-
 static void* pool_work(void* arg) {
   Term* stk  = pool_stack();
   u32   seen = 0;
@@ -5329,7 +5319,6 @@ static void* corpus_map(u64 size) {
   return p;
 }
 
-
 static void corpus_lay(u64* H, u64 size) {
   u64 span = size / 8;
   u64 cap  = span > HEAP_OFF ? (span - HEAP_OFF) / (PAGE_LEN + 10) : 0;
@@ -5367,16 +5356,11 @@ static bool corpus_grow(u64* H, u64 need) {
   return ok;
 }
 
-
 static u64* corpus_setup(bool gpu, long threads, u64 bytes) {
   io_gpu     = gpu;
   KEEP_WORDS = gpu ? CHUNK : CAP_WORDS;
-#ifdef BEND_LANE
-  u64 dflt   = BEND_LANE_SPAN;
-#else
   u64 dflt   = gpu ? gpu_span() : 1ull << 33;
-#endif
-  u64 size   = (gpu && bytes != 0 ? bytes : dflt) & ~16383ull;
+  u64 size   = (bytes != 0 ? bytes : dflt) & ~16383ull;
   CORPUS     = gpu ? gpu_map(size) : corpus_map(size);
   u64* H     = CORPUS;
 #if BEND_CUDA
@@ -5449,14 +5433,6 @@ OUTLINE Term corpus_eval(u64* H, Term t) {
 // macOS poll misses FIFO EOF, so io_wait selects, its sets sized to the
 // highest fd (_DARWIN_UNLIMITED_SELECT allows fds past FD_SETSIZE).
 
-#ifndef BEND_LANE
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#endif
-
 #define IO_READ 1
 #define IO_TIME 2
 #define IO_PARK TERM_HOLE
@@ -5501,30 +5477,12 @@ static u64 io_tick(void) {
   return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
 }
 
-
 OUTLINE void* io_mem(void* mem) {
   if (mem == NULL) {
     err_fail("host allocation failed");
   }
   return mem;
 }
-
-#ifndef BEND_LANE
-static int io_sys_addr(const char* host, u32 port, struct sockaddr_in* at) {
-  memset(at, 0, sizeof(*at));
-  at->sin_family = AF_INET;
-  at->sin_port   = htons((uint16_t)port);
-  for (const char* p = host; *p != 0; p += 1) {
-    if ((p == host || p[-1] == '.') && *p == '0'
-      && p[1] >= '0' && p[1] <= '9') {
-      return -1;
-    }
-  }
-  return port > 65535 || inet_pton(AF_INET, host, &at->sin_addr) != 1
-    ? -1 : 0;
-}
-
-#endif
 
 static int    io_argc;
 static char** io_argv;
@@ -5745,7 +5703,44 @@ static u32             io_busy;
 static u32             io_size;
 static int             io_wake_fd[2];
 
-#ifndef BEND_LANE
+static Term io_exec(Env e, IoWork* w) {
+  Term fs[256];
+  u32  c = (u32)term_aux(w->cont);
+  u32  n = cid_arity(c);
+  spare_free(e, cls_fit(n), ctr_take(e, w->cont, n, fs));
+  w->cont = fs[n - 1];
+  return io_eff_rows[c].run(e, fs, w);
+}
+
+// The host
+// ========
+
+// The runtime's host is the OS: libc, threads, descriptors. A freestanding
+// build brings its own: -DBEND_HOST='"x.c"' skips the OS headers and main,
+// and x.c, included here in place of the OS host below, defines io_take,
+// io_work, io_wait, f32_text, f32_show and f32_read, and an entry that
+// calls io_loop(corpus_setup(false, 1, span)). A build force-includes
+// (-include) whatever libc the runtime calls. io_sys_addr, which the
+// socket effects call, has no stand-in.
+
+#ifdef BEND_HOST
+#include BEND_HOST
+#else
+
+static int io_sys_addr(const char* host, u32 port, struct sockaddr_in* at) {
+  memset(at, 0, sizeof(*at));
+  at->sin_family = AF_INET;
+  at->sin_port   = htons((uint16_t)port);
+  for (const char* p = host; *p != 0; p += 1) {
+    if ((p == host || p[-1] == '.') && *p == '0'
+      && p[1] >= '0' && p[1] <= '9') {
+      return -1;
+    }
+  }
+  return port > 65535 || inet_pton(AF_INET, host, &at->sin_addr) != 1
+    ? -1 : 0;
+}
+
 static void io_take(Env e) {
   IoWork* acts[64];
   ssize_t n;
@@ -5792,24 +5787,12 @@ static Term io_work(IoWork* w, IoCall call, IoPack pack) {
   return IO_PARK;
 }
 
-#endif
-
-static Term io_exec(Env e, IoWork* w) {
-  Term fs[256];
-  u32  c = (u32)term_aux(w->cont);
-  u32  n = cid_arity(c);
-  spare_free(e, cls_fit(n), ctr_take(e, w->cont, n, fs));
-  w->cont = fs[n - 1];
-  return io_eff_rows[c].run(e, fs, w);
-}
-
 static bool io_bit(u8* set, int fd, bool put) {
   u8* at = set + fd / 8;
   *at |= put << fd % 8;
   return *at >> fd % 8 & 1;
 }
 
-#ifndef BEND_LANE
 static void io_wait(Env e) {
   int top  = io_wake_fd[0];
   u64 soon = io_park != NULL ? io_park->next->time : 0;
@@ -5864,9 +5847,8 @@ static void io_wait(Env e) {
   free(set[0]);
 }
 
-#endif
-
 ${NATIVE.IO}
+#endif
 
 // Show
 // ====
@@ -6079,10 +6061,7 @@ ${reqs}
 // Main
 // ====
 
-#ifdef BEND_LANE
-#define BEND_LANE_END 1
-#include BEND_LANE
-#else
+#ifndef BEND_HOST
 
 int main(int argc, char** argv) {
   long thr = 0;
@@ -6136,7 +6115,7 @@ int main(int argc, char** argv) {
     err_fail("--gpu on, but this binary found no usable GPU (a CUDA GPU needs"
       " concurrent managed access, which WSL2's lack)");
   }
-  io_loop(corpus_setup(dev, thr > 0 ? thr : cpu_count(), mem));
+  io_loop(corpus_setup(dev, thr > 0 ? thr : cpu_count(), dev ? mem : 0));
   io_sync();
   return 0;
 }

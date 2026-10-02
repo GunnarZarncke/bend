@@ -1,34 +1,22 @@
-// hypervisor: the bare lane's host, a freestanding aarch64 image for EL2
-// with no libc and no OS. build.sh passes -DBEND_LANE='"bare.c"', and the
-// runtime includes this file twice: after its types, for the shim (the
-// UART, the semihosting exit, the bump heap, the string and stream
-// functions the runtime calls, the memory and signal calls as it makes
-// them, and the prototypes of what boot.c defines), and at its end with
-// BEND_LANE_END, when this file includes boot.c (the boot, the default
-// vectors, bend_main, and the event loop without descriptors).
+// hypervisor: the bare host's libc, for a freestanding aarch64 image at
+// EL2 with no libc and no OS. build.sh force-includes it (-include) ahead
+// of the runtime, which it builds with -DBEND_HOST='"boot.c"': the UART,
+// the semihosting exit, the bump heap, the string and stream functions the
+// runtime calls, and the memory and signal calls as it makes them.
 
-#ifndef BEND_LANE_END
 #include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stdatomic.h>
-
-// the runtime's names the shim's prototypes need, as the template
-// declares them (C lets a typedef repeat); the bodies are at the end
-struct IoWork;
-typedef void (*IoCall)(struct IoWork* w);
-typedef Term (*IoPack)(Env e, struct IoWork* w);
-static int   f32_text(char* buf, f32 v);
-static void  io_take(Env e);
-static Term  io_work(struct IoWork* w, IoCall call, IoPack pack);
-static void  io_wait(Env e);
 
 // Bare
 // ====
 
-// The bare lane (-o x.elf) runs freestanding at EL2 on one ARM64 core:
+// The bare host (-o x.elf) runs freestanding at EL2 on one ARM64 core:
 // no libc, a PL011 UART for the streams, semihosting for exit, and the
 // arena, the term stack and the persist region from the linker script.
-// The shims below stand in for the libc the host lane includes; every
+// The shims below stand in for the libc the OS host includes; every
 // other host function keeps its text. The heap resets per bend_main.
 
 typedef int  FILE;
@@ -59,7 +47,6 @@ extern char __persist_start[], __persist_end[];
 
 #define BARE_HEAP  (64ull << 20)
 #define BARE_UART  ((volatile uint32_t*)0x09000000)
-#define BEND_LANE_SPAN  ((u64)(__arena_end - __arena_start) - BARE_HEAP)
 
 // The host's memory and signal calls, as the runtime makes them. mmap has
 // two callers: pool_stack asks with no address and gets the term stack,
@@ -403,7 +390,7 @@ static int fflush(FILE* h) {
 
 // No libm: a float transcendental fail-stops the program.
 static double bare_math1(double x) {
-  fprintf(stderr, "bend: no libm on the bare lane\n");
+  fprintf(stderr, "bend: no libm on the bare host\n");
   bare_exit(1);
 }
 
@@ -432,7 +419,3 @@ static double bare_math2(double x, double y) {
 #define atan2 bare_math2
 #define pow   bare_math2
 #define fmod  bare_math2
-
-#else
-#include "boot.c"
-#endif
