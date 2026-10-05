@@ -3,6 +3,92 @@
 Each release names what changed for a user. `bend update` installs the
 latest one; the GitHub release carries the same notes.
 
+## 2.0.35 (2026-10-03)
+
+- **M1 and M2 run the GPU again** (#1154, PR #1274 by nicolas-abril): since
+  2.0.29 Apple's compiler died building the GPU program of any program with
+  a `!` on M1 and M2 chips; M3 and M4 were never affected.
+- **A library's names stay its own** (#1045, #1124, #1184, PR #1156 by
+  nicolas-abril): a name the entry file declares as `lib.None` no longer
+  takes the key of `lib.bend`'s own `None`, so its foreign `CID(None)`
+  means the constructor its Bend code means, and C no longer takes the
+  wrong arm or frees into the wrong size class.
+- **Less memory on the CPU** (PRs #1171, #1269 by nicolas-abril): the host
+  grows fewer tasks up front and splits a drain into finer units, so
+  parallel tree-matmul peaks at 14.5 MB instead of 68.5 MB and kmeans at
+  10.8 MB instead of 22.9 MB, with every bench as fast or faster. A spin
+  called in a jump's argument frees the variable it was lent, so a loop
+  over a list no longer keeps the old list's cells (81.6 MB to 1.6 MB, PR
+  #1243 by mizchi). U32 `/` and `%` divide directly on the host and CUDA;
+  only Metal keeps its workaround (PR #1277 by nicolas-abril).
+- **Arrays of equality proofs** build in JS and C (#1130, PR #1219 by oxura).
+- **A deadline or a timer fires while computations keep the loop busy**
+  (#1122, PR #1245 by nicolas-abril): `IO.within` and `IO.sleep` no longer
+  wait for a channel pipeline to end.
+- **Fixes**:
+  - A chain of more than about 86 U32 or 130 F32 operators builds in C
+    (#1123, PR #1239 by nicolas-abril).
+  - `bend f.bend -o f.c` builds at `-O0` with clang 19 and later, for a
+    debug build (PR #1074 by aldeni).
+  - A type with deeply nested sums compiles without hundreds of MB (#1270,
+    PRs #1196 and #1244 by vicmcorrea).
+  - A template with many instances names them in linear time, not
+    quadratic (#1271, PR #1275 by nicolas-abril).
+  - `IO.random_u32` answers `Fail` on the JS lane, as on C, instead of
+    ending the run (#1146, PR #1198 by Yi-111-a).
+  - A match on a binder a constructor column closed says so and lists the
+    causes (#1134, PR #1226 by nicolas-abril).
+  - `bend ... | head` keeps the command's exit status when the reader
+    closes early (#1211, PR #1214 by oxura).
+  - `--verdict --publish` is refused instead of publishing unchecked
+    (#1191, PR #1199 by vicmcorrea).
+  - `--publish` drops a leading byte order mark, so a package whose LICENSE
+    was saved with one imports (PR #1188).
+  - `--verdict`: model search is bounded (#1181, PR #1218 by oxura);
+    recursive groups follow live references only (#1212, PR #1215 by
+    oxura); a dead fallback past the last constructor checks (#1204); an
+    empty datatype goes out with `D.efq : D -> <>` (#1183); a specialized
+    argument is elaborated at each use (#1168, #1178); a match inside a type
+    goes at the goals bend2 checked it at (#1157).
+
+## 2.0.34 (2026-09-28)
+
+- **A shared graph is compared once** (#1071, PR #1151 by Giulio2002):
+  when conversion proves two share cells equal, the second points at the
+  first, so a value used twice on each side is compared once, not walked
+  as a tree. Two Merkle roots of depth 32 over a symbolic leaf, proven
+  equal by `{==}`, check in 0.07 s (they took 2^32 steps). `--verdict`'s
+  kernel does not share yet and runs out of fuel on such a proof.
+
+## 2.0.33 (2026-09-28)
+
+- **Two copies of one term are equal before either unfolds** (#1071, PR
+  #1151 by Giulio2002): a conversion first compares both sides with no def
+  unfolded, then as before. A law proven by induction and used at a fixed
+  size, like `agree(32n, x)` against its written type, checks at once
+  instead of walking a shared chain as a tree of 2^32 steps.
+- **Base opens a value before it copies it**: `U32.min`/`max`, the `F32`
+  helpers, `Char.to_upper`/`to_lower`, `U32.div`/`mod` and `List.sort` match
+  their argument first, so a stuck argument stays one call (#1075).
+- **Base is smaller** (PR #1153 by nicolas-abril, from #1059 by
+  jnadeau207-collab), and `U32.log2` takes five native shifts instead of
+  thirty-two.
+- **Fixes**:
+  - `U32.to_nat` widens to u64 in C, so Nat arithmetic on a u32 local no
+    longer wraps at 2^32 (PR #1142 by Giulio2002).
+  - A shared Array's redirect is read without a race and without a device
+    atomic (PR #1155 by nicolas-abril).
+  - `TCP.recv`, `TCP.recv_bytes` and `TCP.poll` with a max of 0 fail with
+    EINVAL, not a closed peer's `""` (#1121, by aldeni).
+  - Emission does less work per word type and nullary constructor (#1056,
+    by jnadeau207-collab).
+  - `--verdict`: the kernel puts a λ argument into a type annotated with
+    its domain, so a `+` let of `Equal.cong` over a function checks (#1158).
+  - A pure main shows an Array element and a flat value of one type each
+    by its own layout (#1166).
+  - A `CID(k)` in an effect source's comment or string is left alone
+    (#1161, by aldeni).
+
 ## 2.0.32 (2026-09-27)
 
 - **One verdict: `ALL PROOFS CHECK` or `SOME PROOFS FAIL`**: `bend f.bend`

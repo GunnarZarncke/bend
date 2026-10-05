@@ -26,8 +26,10 @@
 // uname is refused in one line; a 2.0.0-2.0.7 launcher's ping and its
 // latest.json fallback name the version, no sha256 and the move notice; the
 // formula carries the sum; --publish ships LICENSE files, names the license
-// as the hub does, refuses a License/ directory, and every request carries
-// User-Agent: bend/<ver>. SKIP when the site repo is not at lib.SITE.
+// as the hub does, sends no leading byte order mark (a package published
+// from a file with one imports), refuses a License/ directory, and every
+// request carries User-Agent: bend/<ver>. SKIP when the site repo is not at
+// lib.SITE.
 
 import * as child from "node:child_process";
 import * as crypto from "node:crypto";
@@ -79,6 +81,13 @@ function run(bin: string, args: string[], env: Record<string, string> = {},
 function bend(args: string[], env: Record<string, string> = {}):
   Promise<lib.Exec> {
   return run(BIN, args, env);
+}
+
+// The reader has exited before bend starts: no race with its first write.
+function bend_closed(args: string[]): Promise<lib.Exec> {
+  return run("bash", ["-c",
+    'exec 3> >(true); wait "$!"; exec "$@" >&3 2>&3',
+    "--", BIN, ...args], { BEND_NO_TELEMETRY: "1" });
 }
 
 // the card without its colors
@@ -280,6 +289,26 @@ try {
   check("guide, base and a program run through the executable",
     guide.out.startsWith("# Bend") && base.out.startsWith("type Map")
     && sum5.code === 0 && sum5.out === "5n\n");
+  const bad_file = path.join(TMP, "bad.bend");
+  const sum_file = path.join(TMP, "sum.bend");
+  const unsafe_file = path.join(TMP, "unsafe.bend");
+  const checkup = path.join(TMP, "checkup.bend");
+  const good_checkup = path.join(TMP, "good_checkup.bend");
+  fs.writeFileSync(unsafe_file,
+    "import Base\n@unsafe\ndef main() -> Nat:\n  0n\n");
+  fs.writeFileSync(checkup,
+    "import ./sum.bend as Good\nimport ./bad.bend as Bad\n");
+  fs.writeFileSync(good_checkup, "import ./sum.bend as Good\n");
+  for (const args of [[bad_file], [bad_file, "--check-only"],
+    [unsafe_file, "--verdict"], ["--unknown"], [checkup, "--checkup"]]) {
+    const got = await bend_closed(args);
+    check("a closed reader keeps failure: " + args.join(" "), got.code === 1);
+  }
+  for (const args of [[sum_file], [sum_file, "--check-only"],
+    ["--help"], [good_checkup, "--checkup"]]) {
+    const got = await bend_closed(args);
+    check("a closed reader keeps success: " + args.join(" "), got.code === 0);
+  }
   const two  = "import Base\ndef two() -> Nat:\n  2n\n";
   const use  = (at: string) => "import Base\nimport ./" + at
     + " as T\ndef main() -> Nat:\n  T.two\n";
@@ -294,6 +323,14 @@ try {
     && got.ok && await got.text() === lics["sub/LICENSE"]);
   check("the notice names the terms and the shallowest LICENSE's SPDX id",
     spdx.err.includes(TERMS + "License: MIT (LICENSE)\n"));
+  for (const flags of [["--verdict", "--publish"], ["--publish", "--verdict"]]) {
+    const count = seen.length;
+    const run = await bend([path.join(TMP, "sum.bend"), ...flags],
+      { BEND_HUB: ORIGIN, BEND_NO_TELEMETRY: "1" });
+    check(flags.join(" ") + " is refused before publishing: " + run.err,
+      run.code === 1 && run.out === "" && run.err === "bend: --publish"
+      + " takes no other option (see bend --help)\n" && seen.length === count);
+  }
   const ids: [string, string][] = [
     ["SPDX-License-Identifier: MIT\r\n", "MIT (LICENSE)"],
     ["SPDX-License-Identifier: (MIT  OR Apache-2.0)\n",
@@ -323,6 +360,17 @@ try {
     && none.err.includes(TERMS + "License: MIT-0, the default (no LICENSE"
     + " file): https://bend-lang.com/bender/terms#s18.4\nwarning: no file is"
     + " named exactly LICENSE"));
+  const bom  = { "lic_bom.bend": use("two.bend"), "two.bend": two,
+    "LICENSE": "SPDX-License-Identifier: MIT\n" };
+  const mark = await publish("bom",
+    { ...bom, "LICENSE": "\uFEFF" + bom.LICENSE });
+  fs.writeFileSync(path.join(TMP, "bom.bend"), "import Base\nimport "
+    + pkg_hash(bom) + "/two.bend as T\ndef main() -> Nat:\n  T.two\n");
+  const imp  = await bend([path.join(TMP, "bom.bend")], { BEND_HUB: ORIGIN });
+  check("a LICENSE opening with a byte order mark goes without it, so the"
+    + " package imports: " + mark.err + imp.err, mark.code === 0
+    && mark.out.startsWith(pkg_hash(bom) + "\n") && imp.code === 0
+    && imp.out === "2n\n");
   const posts = seen.filter((s) => s.startsWith("POST / ")).length;
   const dir  = await publish("dir", { "lic_dir.bend": use("License/two.bend"),
     "License/two.bend": two });
