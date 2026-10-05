@@ -134,6 +134,10 @@ static inline int fclose(FILE* f) {
   return 0;
 }
 
+static inline int sched_yield(void) {
+  return 0;
+}
+
 static inline long sysconf(int name) {
   return 1;
 }

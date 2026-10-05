@@ -1,7 +1,7 @@
 // hypervisor: the bare host, which the runtime includes in place of the
-// OS host (-DBEND_HOST='"boot.c"'): the float text stubs, the MMU, the
-// default vectors, bend_main and _start, and the event loop without
-// descriptors.
+// OS host, bend2/effs/host.c (-DBEND_HOST='"boot.c"'): the float text
+// stubs, the MMU, the default vectors, bend_main and _start, and the event
+// loop without descriptors.
 // SPEC.md, section 10.
 
 static int f32_text(char* buf, f32 v) {
@@ -166,18 +166,18 @@ static Term io_work(IoWork* w, IoCall call, IoPack pack) {
   return IO_PARK;
 }
 
-// No descriptors: the loop takes the finished calls, then spins to the
-// earliest deadline and wakes the timers that passed.
-static void io_wait(Env e) {
+// No descriptors: the loop takes the finished calls, then, if it may
+// block, spins to the earliest deadline; it wakes the timers that passed.
+static void io_wait(Env e, bool block) {
   io_take(e);
-  if (io_runs != NULL) {
+  if (io_runs != NULL && block) {
     return;
   }
   u64 soon = io_park != NULL ? io_park->next->time : 0;
-  if (soon == 0) {
+  if (soon == 0 && block) {
     err_fail("a descriptor wait on the bare host");
   }
-  while (io_tick() < soon) {
+  while (block && io_tick() < soon) {
     __asm__ volatile("yield");
   }
   u64     now  = io_tick();

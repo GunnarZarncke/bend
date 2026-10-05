@@ -251,10 +251,10 @@ the file the shim saved at the last exit.
 `sh demos/hypervisor/build.sh x.bend x.elf` builds any Bend program
 without `!` for EL2 on QEMU. It is an application of the runtime's
 freestanding build, which knows nothing of ARM64: `-DBEND_HOST='"x.c"'`
-skips the OS headers and `main`, and includes x.c in place of the OS host
-(the descriptor event loop, float text, sockets). Here x.c is boot.c: the
-MMU, the default vectors, `bend_main` and `_start`, the float text stubs,
-and the event loop without descriptors. bare.c, force-included ahead of
+skips the OS headers and `main`, and includes x.c in place of the OS host,
+`bend2/effs/host.c` (the descriptor event loop, float text, sockets). Here
+x.c is boot.c: the MMU, the default vectors, `bend_main` and `_start`, the
+float text stubs, and the event loop without descriptors. bare.c, force-included ahead of
 the runtime, is the libc it calls (the UART streams, semihosting exit, a
 bump heap, the string functions, and the memory and signal calls as the
 runtime makes them, so its own pool and corpus code runs unchanged over

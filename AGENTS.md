@@ -17,7 +17,8 @@ lines its run must print, and the gates run on the mini cluster.
                         Empty, live code halts) and their proofs; --verdict
                         builds its CLI once, with Lean v4.34.0
     bend2/base.bend     the base library
-    bend2/effs/         IO effect sources per backend; related effects may share
+    bend2/effs/         IO effect sources per backend; related effects may share;
+                        host.c, the OS host the C runtime splices in
     bend2/pack/         package.json, tsconfig.json, bun.lock
     bend2/docs/         the papers' Typst sources, the film, gen_pins.ts (the
                         record pins on this Mac), gen_charts.ts (the landing
