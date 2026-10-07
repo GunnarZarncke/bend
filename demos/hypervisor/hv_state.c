@@ -325,5 +325,5 @@ Term hv_instance_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_instance_use(void) {
-  io_eff(CID(Hv.instance), hv_instance_run, 0);
+  io_eff(CID(Hv.instance), hv_instance_run);
 }

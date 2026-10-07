@@ -10,7 +10,7 @@ Term hv_select_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_select_use(void) {
-  io_eff(CID(Hv.select), hv_select_run, 0);
+  io_eff(CID(Hv.select), hv_select_run);
 }
 
 // Snap
@@ -30,5 +30,5 @@ Term hv_snap_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_snap_use(void) {
-  io_eff(CID(Hv.snap), hv_snap_run, 0);
+  io_eff(CID(Hv.snap), hv_snap_run);
 }

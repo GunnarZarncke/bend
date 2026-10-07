@@ -93,7 +93,7 @@ Term hv_init_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_init_use(void) {
-  io_eff(CID(Hv.init), hv_init_run, 0);
+  io_eff(CID(Hv.init), hv_init_run);
 }
 
 // Commit
@@ -120,7 +120,7 @@ Term hv_commit_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_commit_use(void) {
-  io_eff(CID(Hv.commit), hv_commit_run, 0);
+  io_eff(CID(Hv.commit), hv_commit_run);
 }
 
 // Arm
@@ -138,7 +138,7 @@ Term hv_arm_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_arm_use(void) {
-  io_eff(CID(Hv.arm), hv_arm_run, 0);
+  io_eff(CID(Hv.arm), hv_arm_run);
 }
 // Enter
 // -----
@@ -186,7 +186,7 @@ Term hv_enter_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_enter_use(void) {
-  io_eff(CID(Hv.enter), hv_enter_run, 0);
+  io_eff(CID(Hv.enter), hv_enter_run);
 }
 
 // Handoff
@@ -212,7 +212,7 @@ Term hv_load_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_load_use(void) {
-  io_eff(CID(Hv.load), hv_load_run, 0);
+  io_eff(CID(Hv.load), hv_load_run);
 }
 
 Term hv_store_run(Env e, Term* f, IoWork* w) {
@@ -226,7 +226,7 @@ Term hv_store_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_store_use(void) {
-  io_eff(CID(Hv.store), hv_store_run, 0);
+  io_eff(CID(Hv.store), hv_store_run);
 }
 
 // Again
@@ -239,5 +239,5 @@ Term hv_again_run(Env e, Term* f, IoWork* w) {
 }
 
 static void __attribute__((constructor)) hv_again_use(void) {
-  io_eff(CID(Hv.again), hv_again_run, 0);
+  io_eff(CID(Hv.again), hv_again_run);
 }
