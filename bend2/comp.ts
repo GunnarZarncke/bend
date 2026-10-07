@@ -1906,7 +1906,7 @@ function show_main(): (number | Name)[] | null {
 // ===
 
 // A statement in normal form is a fork, a cut, a let of a
-// value, or a tail. An over-application cuts its call prefix;
+// value, or a tail. A live over-application cuts its call prefix;
 // a variable applied to erased arguments is the variable.
 
 function anf(t: HTerm, ty: HTerm | null = null): HTerm {
@@ -1949,11 +1949,12 @@ function anf(t: HTerm, ty: HTerm | null = null): HTerm {
           if (f.$ !== "App") {
             return f;
           }
-          if (m.t.$ === "Var" && !m.args.includes(f.x)) {
+          const on = m.args.includes(f.x);
+          if (m.t.$ === "Var" && !on) {
             return spine(f.f);
           }
-          const g = cut(spine(f.f), ty_ann(f.f));
-          const x = m.args.includes(f.x) ? go(f.x, false, null) : f.x;
+          const g = on ? cut(spine(f.f), ty_ann(f.f)) : spine(f.f);
+          const x = on ? go(f.x, false, null) : f.x;
           return g === f.f && x === f.x ? f : Bend.App(g, x, f.s);
         };
         const r = spine(s);
@@ -2851,8 +2852,11 @@ export function compile_book(book: Bend.Book): string {
     return (dev.has(seg.fid) ? out : ["#if !DEVICE", ...out, "#endif"])
       .join("\n");
   }).join("\n\n");
-  return c_ids(runtime_c([tabs, ...desc].join("\n\n"), spins, segs,
+  const c = c_ids(runtime_c([tabs, ...desc].join("\n\n"), spins, segs,
     effect_srcs(".c", "no .c import: ").join("")));
+  // keep nothing memoized: clang may run next, while this process waits
+  FL = file_new(book, false);
+  return c;
 }
 
 // JS
@@ -3093,6 +3097,9 @@ function js_def(sc: Scope, k: Name, def: Bend.Def): void {
   file_push(sc, "");
 }
 
+// A part with a converter of its own waits on one work stack, so no depth
+// grows the JS call stack; a Nat or function part converts on the spot.
+// Arrays stay in-place; ADT nodes are copied.
 function js_marshal(A: HTerm | null, out: boolean): string {
   const t = ty_wnf(A);
   if (t?.$ === "All") {
@@ -3113,38 +3120,42 @@ function js_marshal(A: HTerm | null, out: boolean): string {
   if (t.k === "Nat") {
     return out ? "BigInt" : "nat_host";
   }
-  if (t.k === "Array") {
-    return `((a) => (a.forEach((x, i) => a[i] = ${js_marshal(t.x[0], out)
-      }(x)), a))`;
-  }
   const key = (out ? "out " : "in ") + Bend.term_key(Bend.term_lower(t));
   return memo(FL.marsh, key, () => {
     const name = "$0m" + FL.marsh.size;
     FL.marsh.set(key, name);
-    const cs = (FL.book.tlds[t.k] as Bend.ADT).c;
-    const arms = cs.map((c) => {
-      const fs = ctr_live(c, t.x).flatMap(([, n, B]) => {
-        const f = js_marshal(B, out);
-        return f === "" ? [] : [[n, f]];
+    const put = (f: string, a: string, i: string): string => f[0] === "$"
+      ? `q.push(${f}, ${a}, ${i});` : `${a}[${i}] = ${f}(${a}[${i}]);`;
+    const body: string[] = [];
+    if (t.k === "Array") {
+      const f = js_marshal(t.x[0], out);
+      if (f === "") return "";
+      body.push(`r = v; v.forEach((x, i) => { ${put(f, "v", "i")} });`);
+    } else {
+      const cs = (FL.book.tlds[t.k] as Bend.ADT).c;
+      const arms = cs.map((c) => {
+        const fs = ctr_live(c, t.x).flatMap(([, n, B]) => {
+          const f = js_marshal(B, out);
+          return f === "" ? [] : [put(f, "r", `"${n}"`)];
+        });
+        return [`case "${Bend.name_key(c.k)}": r = ${fs.length ? "{...v}"
+          : "v"};`, ...fs, "break;"].join(" ");
       });
-      const [n] = fs.filter(([, f]) => f === name).pop() ?? [];
-      const copy = fs.filter(([m]) => m !== n).map(([m, f]) =>
-        `, ${js_key(m)}${f}(v["${m}"])`).join("");
-      const tag = Bend.name_key(c.k);
-      return `case "${tag}": ` + (fs.length === 0 ? "at[key] = v; return top[0];"
-        : `at = at[key] = {...v${copy}}; ` + (n === undefined ? "return top[0];"
-        : `key = "${n}"; v = v[key]; continue;`));
-    });
-    const tk = Bend.name_key(t.k);
-    const tags = cs.map((c) => Bend.name_key(c.k)).join(", ");
-    FL.spins.push({ ...seg_new("", BOX, ["v"]), lines: [`function ${name}(v) {`,
-      "const top = [v];", "for (let at = top, key = 0;;) {", "switch (v.$) {",
-      // TODO(#1105): a tag is the key the loading book gives its constructor,
-      // so it depends on the root file; make tags the same in every book
-      ...arms, `default: throw "bend: ${tk} has no tag " + v?.$ + " (its tags: ${
-        tags}); a tag names its constructor as the"
-      + " loading file sees it, which a later version will make the same"
-      + " everywhere (#1105)";`, "}", "}", "}", ""] });
+      const tk = Bend.name_key(t.k);
+      const tags = cs.map((c) => Bend.name_key(c.k)).join(", ");
+      body.push("switch (v.$) {", ...arms,
+        // TODO(#1105): a tag is the key the loading book gives its constructor,
+        // so it depends on the root file; make tags the same in every book
+        `default: throw "bend: ${tk} has no tag " + v?.$ + " (its tags: ${
+          tags}); a tag names its constructor as the"
+        + " loading file sees it, which a later version will make the same"
+        + " everywhere (#1105)";`, "}");
+    }
+    FL.spins.push({ ...seg_new("", BOX, ["v"]), lines: [`function ${name}(v, q) {`,
+      "const own = q === undefined;", "if (own) q = [];", "let r;", ...body,
+      "if (own) while (q.length) {",
+      "const i = q.pop(), a = q.pop(); a[i] = q.pop()(a[i], q);",
+      "}", "return r;", "}", ""] });
     return name;
   });
 }
@@ -5323,7 +5334,7 @@ typedef struct IoWork {
 
 typedef Term (*Effect)(Env e, Term* f, IoWork* w);
 
-Effect io_eff_rows[1 << 16];
+Effect io_eff_rows[sizeof CID_T / sizeof *CID_T];
 static u32    io_live;
 
 static u64 io_tick(void) {
