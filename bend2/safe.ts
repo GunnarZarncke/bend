@@ -939,7 +939,7 @@ function term(e: Safe, s0: Scope, t: HTerm, live: boolean): O {
       return ctr_term(e, s, x, T, live);
     }
     case "Lit": {
-      if (x.k === "Nat" && x.v > NAT_MAX) {
+      if (x.k === "Nat" && x.v > NAT_MAX && e.book.tlds.Nat?.b === true) {
         // a long Nat is q * NAT_MAX + r, by base's Nat.mul and Nat.add
         const [q, r] = [Math.floor(x.v / NAT_MAX), x.v % NAT_MAX];
         const mul = B.App(B.App(B.Ref("Nat.mul"), B.Lit("Nat", q)), B.Lit("Nat", NAT_MAX));
@@ -1497,7 +1497,7 @@ function kernel_bin(): string {
   const tool = (t: string): string => fs.existsSync(path.join(home, t)) ? path.join(home, t) : t;
   fs.mkdirSync(dir, { recursive: true });
   const fail = (why: string): never => {
-    throw new Error("the kernel did not build (" + why
+    throw new Error("BendTT infrastructure: the kernel did not build (" + why
       + "); --verdict needs Lean v" + LEAN_VERSION + " (elan toolchain leanprover/lean4:v" + LEAN_VERSION + "), or $BENDTT set to a built kernel");
   };
   const run = (bin: string, args: string[]): string => {
@@ -1545,6 +1545,12 @@ function kernel_check(text: string): boolean {
     const inp = path.join(dir, "in.bendtt");
     fs.writeFileSync(inp, text, { flag: "wx" });
     const [got, out] = run_read(kernel_bin(), [inp], { env });
+    if (got.error || got.signal || got.status === null
+      || (out.trim() !== "ALL PROOFS CHECK" && !out.startsWith("SOME PROOFS FAIL"))) {
+      throw new Error("BendTT infrastructure: " + (got.error?.message
+        ?? (got.signal ? "kernel terminated by " + got.signal : out.trim()
+          || "kernel exited " + got.status + " without a verdict")));
+    }
     return got.status === 0 && out.trim() === "ALL PROOFS CHECK";
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
