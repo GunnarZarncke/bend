@@ -2,10 +2,9 @@
 # shares, and a power of two for the BendTT kernel, which substitutes
 # without sharing. bend2 checks this claim at 24 steps, and at 60, in
 # 0.06 s; --verdict takes 0.3 s at 16 steps, 4 s at 20, and from 22 the
-# kernel runs out of its 400M fuel, which --verdict reports as a
-# mismatch between the two checkers rather than as fuel. Nothing warns of
-# it before then: a model a proof runs symbolically (a machine's state,
-# each step reading the step before) meets it at a handful of steps.
+# kernel runs out of its 400M fuel. Nothing warns of it before then: a
+# model a proof runs symbolically (a machine's state, each step reading
+# the step before) meets it at a handful of steps.
 #
 # This test FAILS the verdict gate, on purpose: bend2 checks it and the
 # kernel does not. When the kernel shares a copied argument, or bend2
