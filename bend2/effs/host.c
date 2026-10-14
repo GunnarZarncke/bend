@@ -13,9 +13,8 @@
 // (_DARWIN_UNLIMITED_SELECT allows fds past FD_SETSIZE).
 
 static int io_sys_addr(const char* host, u32 port, struct sockaddr_in* at) {
-  memset(at, 0, sizeof(*at));
-  at->sin_family = AF_INET;
-  at->sin_port   = htons((uint16_t)port);
+  *at = (struct sockaddr_in){ .sin_family = AF_INET,
+    .sin_port = htons((uint16_t)port) };
   for (const char* p = host; *p != 0; p += 1) {
     if ((p == host || p[-1] == '.') && *p == '0'
       && p[1] >= '0' && p[1] <= '9') {
@@ -81,18 +80,16 @@ static bool io_bit(u8* set, int fd, bool put) {
 static void io_wait(Env e, bool block) {
   int top  = io_wake_fd[0];
   u64 soon = io_park != NULL ? io_park->next->time : 0;
-  for (IoWork* a = io_park; a != NULL;
-    a = a->next != io_park ? a->next : NULL) {
+  io_parked(a) {
     if (a->evts != 0 && (int)a->word > top) {
       top = (int)a->word;
     }
   }
   u64 len = (u64)top / 64 * 8 + 8;
-  u8* set[2] = { io_mem(calloc(2, len)), NULL };
+  u8* set[2] = { io_mem(calloc(2, len)) };
   set[1] = set[0] + len;
   io_bit(set[0], io_wake_fd[0], true);
-  for (IoWork* a = io_park; a != NULL;
-    a = a->next != io_park ? a->next : NULL) {
+  io_parked(a) {
     if (a->evts != 0) {
       io_bit(set[a->evts == POLLOUT], (int)a->word, true);
     }
@@ -168,7 +165,7 @@ static Term f32_show(Env e, Term x) {
 }
 
 static Term f32_read(Env e, Term s) {
-  u64 n = 0;
+  u64 n;
   char* text = io_cstr(e, s, &n);
   char* end;
   f32 v = strtof(text, &end);
