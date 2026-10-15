@@ -289,6 +289,12 @@ def run(input: Lint.Input) -> IO(List<&2, Lint.Diag>):
 term view `body`, `node`, `shape` and `fact`, plus Base's. Options come from `Lint.option_number`, `option_flag` and `option_text`,
 each with a default. Numbers are whole, 0 to 4294967295 (U32).
 
+Migration: the option constructors `Lint.Num`, `Lint.Flag` and `Lint.Text`
+are now `Lint.OptionNum`, `Lint.OptionFlag` and `Lint.OptionText`. Update
+direct construction and match patterns, including bare constructor names,
+and any foreign `CID(...)` references. The option helpers and configuration
+values are unchanged.
+
 Spans count Unicode code points here. TypeScript counts UTF-16 units.
 
 The rule is compiled once and runs on Bend's JavaScript runtime. Use tail
@@ -388,9 +394,9 @@ into `/` paths so imports resolve on Windows. `comp.ts` also exports
 code as `bend <file>`, never a copy of it. Imported, `main.ts` also registers
 Bend's loader for `import "x.bend"`.
 
-If a file has a line that's exactly `import Base` (what `bend --checkup` reads),
-it reuses one Base, checked once per process. Base facts are left out of rule
-requests.
+If a file imports Base in its initial header (what `bend --checkup` reads),
+it reuses the latest checked Base, checking it again when its source changes.
+Base facts are left out of rule requests.
 
 A failed check is one `bend/check` finding. Its message is Bend's, without the
 location: expected and observed, with the names in scope, and Bend's note.

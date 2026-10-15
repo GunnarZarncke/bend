@@ -86,26 +86,25 @@ static void io_wait(Env e, bool block) {
     }
   }
   u64 len = (u64)top / 64 * 8 + 8;
-  u8* set[2] = { io_mem(calloc(2, len)) };
-  set[1] = set[0] + len;
-  io_bit(set[0], io_wake_fd[0], true);
+  u8* set = io_mem(calloc(2, len));
+  io_bit(set, io_wake_fd[0], true);
   io_parked(a) {
     if (a->evts != 0) {
-      io_bit(set[a->evts == POLLOUT], (int)a->word, true);
+      io_bit(set + (a->evts == POLLOUT) * len, (int)a->word, true);
     }
   }
   u64 tick = io_tick();
   u64 ms = soon > tick && block ? (soon - tick) / 1000000 + 1 : 0;
   struct timeval tv = { ms / 1000, ms % 1000 * 1000 };
   io_sync();
-  if (select(top + 1, (fd_set*)set[0], (fd_set*)set[1], NULL,
+  if (select(top + 1, (fd_set*)set, (fd_set*)(set + len), NULL,
     soon == 0 && block ? NULL : &tv) < 0) {
     if (errno != EINTR) {
       err_fail("the poller failed");
     }
-    memset(set[0], 0, 2 * len);
+    memset(set, 0, 2 * len);
   }
-  if (io_bit(set[0], io_wake_fd[0], false)) {
+  if (io_bit(set, io_wake_fd[0], false)) {
     io_take(e);
   }
   u64     now  = io_tick();
@@ -114,7 +113,7 @@ static void io_wait(Env e, bool block) {
   while (todo != NULL) {
     IoWork* a   = io_pop(&todo);
     bool    due = (a->evts != 0
-        && io_bit(set[a->evts == POLLOUT], (int)a->word, false))
+        && io_bit(set + (a->evts == POLLOUT) * len, (int)a->word, false))
       || (a->time != 0 && a->time <= now);
     if (!due) {
       io_park_add(a);
@@ -126,7 +125,7 @@ static void io_wait(Env e, bool block) {
       io_push(&io_runs, a);
     }
   }
-  free(set[0]);
+  free(set);
 }
 
 static int f32_text(char* buf, f32 v) {
@@ -147,7 +146,7 @@ static int f32_text(char* buf, f32 v) {
   }
   int ex = atoi(ep + 1);
   if (ex >= 21 || ex <= -7) {
-    n = (int)(ep - buf) + sprintf(ep, "e%c%d", ex < 0 ? '-' : '+', abs(ex));
+    n = (int)(ep - buf) + sprintf(ep, "e%+d", ex);
   } else if (ex <= p) {
     n = snprintf(buf, 40, "%.*f", p - ex, (double)v);
   } else {
@@ -156,6 +155,7 @@ static int f32_text(char* buf, f32 v) {
     memset(buf + s + 1 + p, '0', ex - p);
     n = s + 1 + ex;
   }
+  buf[n] = 0;
   return n;
 }
 
